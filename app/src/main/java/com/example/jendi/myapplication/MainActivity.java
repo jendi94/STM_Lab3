@@ -7,12 +7,20 @@ import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
+import android.util.Log;
 import android.view.View;
-import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ListView;
 import android.widget.Spinner;
+import android.widget.TextView;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Set;
 
@@ -26,6 +34,11 @@ public class MainActivity extends AppCompatActivity {
     private String name = "name";
     private ConnectedThread service;
     private AcceptThread acceptThread;
+    public String textToWrite, textToRead, textToSend;
+    public ListView listView;
+    public ArrayList<String> values;
+    private ArrayAdapter<String> textAdapter;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -34,7 +47,7 @@ public class MainActivity extends AppCompatActivity {
         bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
 
         if (bluetoothAdapter != null) {
-              System.out.println("Nigdy tu nie wejde xD");
+            //do nothing
         }
         else if (!bluetoothAdapter.isEnabled()) {
             // Poproś użytkownika o zgodę na włączenie Bluetooth
@@ -43,7 +56,7 @@ public class MainActivity extends AppCompatActivity {
             startActivityForResult(enableBtIntent, 1);
         }
 
-        Spinner spinner = findViewById(R.id.spinner);
+        final Spinner spinner = findViewById(R.id.spinner);
         Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
 
         ArrayList<String> pairedDevicesList = new ArrayList<String>();
@@ -59,28 +72,39 @@ public class MainActivity extends AppCompatActivity {
 
         final Set<BluetoothDevice> finalDevices = pairedDevices;
 
-        spinner.setOnItemSelectedListener(new
-        AdapterView.OnItemSelectedListener() {
-           @Override
-           public void onItemSelected(AdapterView<?> arg0, View arg1,
-                                      int arg2, long arg3) {
-               String targetDeviceDesc =
-                       arg0.getItemAtPosition(arg2).toString();
-               String mac =
-                       targetDeviceDesc.substring(targetDeviceDesc.indexOf('[')
-                               +1, targetDeviceDesc.indexOf(']'));
-               for (BluetoothDevice device : finalDevices) {
+        Button chat = findViewById(R.id.buttonChat);
+        chat.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                String targetDeviceDesc =
+                        spinner.getItemAtPosition(0).toString();
+                String mac =
+                        targetDeviceDesc.substring(targetDeviceDesc.indexOf('[')
+                                +1, targetDeviceDesc.indexOf(']'));
+                for (BluetoothDevice device : finalDevices) {
                     if(device.getAddress().equals(mac)) {
                         targetDevice = device;
                         acceptThread.cancel();
                         ConnectThread connectThread = new ConnectThread(targetDevice);
                         connectThread.start();
                     }
-               }
-           }
-           @Override
-           public void onNothingSelected(AdapterView<?> arg0) {}
+                }
+            }
         });
+
+        Button button = findViewById(R.id.buttonSend);
+        button.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                service.write();
+            }
+        });
+
+        listView = findViewById(R.id.list);
+        values = new ArrayList<>();
+        textAdapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_list_item_1, android.R.id.text1, values);
+        listView.setAdapter(textAdapter);
 
         acceptThread = new AcceptThread();
         acceptThread.start();
@@ -92,7 +116,7 @@ public class MainActivity extends AppCompatActivity {
         public AcceptThread() {
             BluetoothServerSocket tmp = null;
             try {
-                tmp = bluetoothAdapter.listenUsingInsecureRfcommWithServiceRecord(name, fromString(UUID));
+                tmp = bluetoothAdapter.listenUsingRfcommWithServiceRecord(name, fromString(UUID));
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -100,7 +124,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         public void run() {
-            BluetoothSocket bluetoothSocket;
+            BluetoothSocket bluetoothSocket = null;
             while (true) {
                 try {
                     bluetoothSocket = bluetoothServerSocket.accept();
@@ -108,7 +132,6 @@ public class MainActivity extends AppCompatActivity {
                     service.start();
                 } catch (IOException e) {
                     e.printStackTrace();
-                    break;
                 }
 
                 if (bluetoothSocket != null) {
@@ -164,6 +187,92 @@ public class MainActivity extends AppCompatActivity {
 
         public void cancel() throws IOException {
             bluetoothSocket.close();
+        }
+    }
+
+    public class ConnectedThread extends Thread {
+        private static final String TAG = "";
+        private final BluetoothSocket mmSocket;
+        private final InputStream mmInStream;
+        private final OutputStream mmOutStream;
+        private byte[] mmBuffer; // mmBuffer store for the stream
+
+        public ConnectedThread(BluetoothSocket socket) {
+            mmSocket = socket;
+            InputStream tmpIn = null;
+            OutputStream tmpOut = null;
+
+            // Get the input and output streams; using temp objects because
+            // member streams are final.
+            try {
+                tmpIn = socket.getInputStream();
+            } catch (IOException e) {
+                Log.e(TAG, "Error occurred when creating input stream", e);
+            }
+            try {
+                tmpOut = socket.getOutputStream();
+            } catch (IOException e) {
+                Log.e(TAG, "Error occurred when creating output stream", e);
+            }
+
+            mmInStream = tmpIn;
+            mmOutStream = tmpOut;
+        }
+
+        public void run() {
+            mmBuffer = new byte[1024];
+            // Keep listening to the InputStream until an exception occurs.
+            while (true) {
+                try {
+                    // Read from the InputStream.
+                    ObjectInputStream objectInputStream = new ObjectInputStream(mmInStream);
+                    try {
+                        textToRead = (String) objectInputStream.readObject();
+                    } catch (ClassNotFoundException e) {
+                        e.printStackTrace();
+                    }
+                    MainActivity.this.runOnUiThread(new Runnable() {
+                        public void run() {
+                            values.add("Them: "+textToRead);
+                            textAdapter.notifyDataSetChanged();
+                        }
+                    });
+                    // Send the obtained bytes to the UI activity.
+                } catch (IOException e) {
+                    Log.d(TAG, "Input stream was disconnected", e);
+                    break;
+                }
+            }
+        }
+
+        // Call this from the main activity to send data to the remote device.
+        public void write() {
+            try {
+                ObjectOutputStream objectOutputStream = new ObjectOutputStream(mmOutStream);
+                MainActivity.this.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        EditText editText = findViewById(R.id.inputText);
+                        textToWrite = "Me: " + editText.getText().toString();
+                        textToSend = editText.getText().toString();
+                        editText.setText("");
+                        values.add(textToWrite);
+                        textAdapter.notifyDataSetChanged();
+                    }
+                });
+                objectOutputStream.writeObject(textToSend);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        // Call this method from the main activity to shut down the connection.
+        public void cancel() {
+            try {
+                mmSocket.close();
+            } catch (IOException e) {
+                Log.e(TAG, "Could not close the connect socket", e);
+            }
         }
     }
 }
