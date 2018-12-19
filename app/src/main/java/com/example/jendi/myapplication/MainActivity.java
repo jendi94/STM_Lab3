@@ -77,7 +77,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onClick(View view) {
                 String targetDeviceDesc =
-                        spinner.getItemAtPosition(0).toString();
+                        spinner.getItemAtPosition((int) spinner.getSelectedItemId()).toString();
                 String mac =
                         targetDeviceDesc.substring(targetDeviceDesc.indexOf('[')
                                 +1, targetDeviceDesc.indexOf(']'));
